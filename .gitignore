@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Local verification artifacts
+.work/
+*.log
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# AI generation intermediates. Keep final transparent sprites in assets/.
+assets/*-chromakey.png
+assets/ai-sprite-sheet.png

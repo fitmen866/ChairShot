@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>椅背投石机</title>
+    <link rel="stylesheet" href="./src/styles.css" />
+  </head>
+  <body>
+    <main class="game-shell">
+      <section class="hud" aria-label="游戏状态">
+        <div class="brand">
+          <span class="brand-mark">椅</span>
+          <div>
+            <h1>椅背投石机</h1>
+            <p>按住蓄力，松开发射泡面。</p>
+          </div>
+        </div>
+
+        <div class="meters">
+          <div class="meter-card">
+            <span>蓄力</span>
+            <div class="meter-track">
+              <div id="powerBar" class="meter-fill"></div>
+            </div>
+          </div>
+          <div class="meter-card">
+            <span>角度</span>
+            <strong id="angleReadout">0°</strong>
+          </div>
+          <div class="meter-card">
+            <span>得分</span>
+            <strong id="scoreReadout">0</strong>
+          </div>
+        </div>
+
+        <button id="resetButton" class="icon-button" type="button" aria-label="重新开始" title="重新开始">
+          <span aria-hidden="true">↻</span>
+        </button>
+      </section>
+
+      <section class="stage-wrap" aria-label="椅背投石机游戏区域">
+        <canvas id="gameCanvas" width="1280" height="720"></canvas>
+        <div id="messagePanel" class="message-panel">
+          <strong>准备开弹</strong>
+          <span>按住画面或空格蓄力</span>
+        </div>
+      </section>
+
+      <section class="controls" aria-label="游戏操作">
+        <button id="chargeButton" class="charge-button" type="button">
+          <span>按住蓄力</span>
+        </button>
+        <div class="hint">电脑端可按空格。目标是让泡面砸中右侧显示器。</div>
+      </section>
+    </main>
+
+    <script src="./src/game.js"></script>
+  </body>
+</html>
