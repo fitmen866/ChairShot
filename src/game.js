@@ -6,6 +6,18 @@ const scoreReadout = document.querySelector("#scoreReadout");
 const resetButton = document.querySelector("#resetButton");
 const chargeButton = document.querySelector("#chargeButton");
 const messagePanel = document.querySelector("#messagePanel");
+const stageWrap = document.querySelector(".stage-wrap");
+const menuOverlay = document.querySelector("#menuOverlay");
+const startGameButton = document.querySelector("#startGameButton");
+const leaderboardButton = document.querySelector("#leaderboardButton");
+const volumeButton = document.querySelector("#volumeButton");
+const leaderboardList = document.querySelector("#leaderboardList");
+const clearScoresButton = document.querySelector("#clearScoresButton");
+const volumeSlider = document.querySelector("#volumeSlider");
+const volumeValue = document.querySelector("#volumeValue");
+const muteButton = document.querySelector("#muteButton");
+const testSoundButton = document.querySelector("#testSoundButton");
+const backButtons = document.querySelectorAll("[data-menu-back]");
 
 const W = canvas.width;
 const H = canvas.height;
@@ -16,32 +28,31 @@ const minBackAngle = -12;
 const maxBackAngle = -57;
 const target = { x: 850, y: 323, w: 292, h: 174 };
 const chair = { seatX: 344, seatY: 471, backPivotX: 315, backPivotY: 452 };
+const scoresKey = "chair-catapult-scores";
+const volumeKey = "chair-catapult-volume";
 
 const state = {
+  screen: "menu",
   mode: "ready",
   charge: 0,
   score: 0,
-  best: 0,
+  scores: readScores(),
+  best: readScores()[0] ?? 0,
+  volume: readVolume(),
+  muted: readVolume() === 0,
+  audioContext: null,
   chairAngle: minBackAngle,
   recoil: 0,
   shake: 0,
   noodles: makeNoodlesAtRest(),
   particles: [],
   lastTime: performance.now(),
-  messageTitle: "准备开弹",
+  messageTitle: "准备开始",
   messageBody: "按住画面或空格蓄力",
-  flightStartedAt: 0,
   releaseTimer: 0,
   pendingLaunch: null,
-  artReady: false,
   spritesReady: false,
 };
-
-const backgroundArt = new Image();
-backgroundArt.src = "./assets/game-scene.png";
-backgroundArt.addEventListener("load", () => {
-  state.artReady = true;
-});
 
 const sprites = {
   gamerChair: loadSprite("./assets/ai-gamer-chair.png"),
@@ -89,6 +100,28 @@ function easeInCubic(t) {
   return v * v * v;
 }
 
+function readScores() {
+  try {
+    const scores = JSON.parse(localStorage.getItem(scoresKey) ?? "[]");
+    return Array.isArray(scores) ? scores.filter(Number.isFinite).slice(0, 5) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveScores() {
+  localStorage.setItem(scoresKey, JSON.stringify(state.scores.slice(0, 5)));
+}
+
+function readVolume() {
+  const saved = Number(localStorage.getItem(volumeKey));
+  return Number.isFinite(saved) ? clamp(saved, 0, 1) : 0.7;
+}
+
+function saveVolume() {
+  localStorage.setItem(volumeKey, String(state.muted ? 0 : state.volume));
+}
+
 function setMessage(title, body) {
   state.messageTitle = title;
   state.messageBody = body;
@@ -102,18 +135,108 @@ function updateHud() {
   scoreReadout.textContent = `${state.score}`;
 }
 
-function startCharge() {
-  if (state.mode === "hit" || state.mode === "miss") {
-    resetRound();
+function showMenu(panel = "main") {
+  state.screen = panel === "game" ? "game" : "menu";
+  menuOverlay.classList.toggle("is-hidden", panel === "game");
+  stageWrap.classList.toggle("menu-open", panel !== "game");
+  menuOverlay.dataset.view = panel;
+  document.querySelectorAll(".menu-view").forEach((view) => {
+    view.classList.toggle("is-active", view.dataset.panel === panel);
+  });
+  if (panel === "leaderboard") renderLeaderboard();
+  if (panel === "volume") renderVolume();
+}
+
+function startGame() {
+  state.screen = "game";
+  state.score = 0;
+  resetRound();
+  showMenu("game");
+  playTone(440, 0.08, "square");
+}
+
+function renderLeaderboard() {
+  const scores = state.scores.slice(0, 5);
+  if (!scores.length) {
+    leaderboardList.innerHTML = `<div class="leaderboard-empty">还没有成绩，先来一发泡面开张。</div>`;
+    return;
   }
-  if (state.mode !== "ready" && state.mode !== "resetting") return;
+  leaderboardList.innerHTML = scores
+    .map(
+      (score, index) => `
+        <li>
+          <span class="leaderboard-rank">#${index + 1}</span>
+          <span>椅背选手</span>
+          <span class="leaderboard-score">${score}</span>
+        </li>
+      `,
+    )
+    .join("");
+}
+
+function addScore(score) {
+  state.scores = [...state.scores, score].sort((a, b) => b - a).slice(0, 5);
+  state.best = state.scores[0] ?? 0;
+  saveScores();
+}
+
+function renderVolume() {
+  volumeSlider.value = Math.round((state.muted ? 0 : state.volume) * 100);
+  volumeValue.textContent = `${volumeSlider.value}%`;
+  muteButton.textContent = state.muted ? "取消静音" : "静音";
+}
+
+function setVolume(value) {
+  state.volume = clamp(value, 0, 1);
+  state.muted = state.volume === 0;
+  saveVolume();
+  renderVolume();
+}
+
+function toggleMute() {
+  state.muted = !state.muted;
+  if (!state.muted && state.volume === 0) state.volume = 0.7;
+  saveVolume();
+  renderVolume();
+  playTone(state.muted ? 180 : 520, 0.08, "triangle");
+}
+
+function getAudioContext() {
+  if (!state.audioContext) {
+    state.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  return state.audioContext;
+}
+
+function playTone(frequency, duration = 0.08, type = "sine") {
+  const gainValue = state.muted ? 0 : state.volume;
+  if (gainValue <= 0) return;
+  const audio = getAudioContext();
+  const oscillator = audio.createOscillator();
+  const gain = audio.createGain();
+  oscillator.type = type;
+  oscillator.frequency.value = frequency;
+  gain.gain.setValueAtTime(0.0001, audio.currentTime);
+  gain.gain.exponentialRampToValueAtTime(gainValue * 0.14, audio.currentTime + 0.01);
+  gain.gain.exponentialRampToValueAtTime(0.0001, audio.currentTime + duration);
+  oscillator.connect(gain);
+  gain.connect(audio.destination);
+  oscillator.start();
+  oscillator.stop(audio.currentTime + duration + 0.02);
+}
+
+function startCharge() {
+  if (state.screen !== "game") return;
+  if (state.mode === "hit" || state.mode === "miss") resetRound();
+  if (state.mode !== "ready") return;
   state.mode = "charging";
   state.charge = Math.max(state.charge, 0.08);
-  setMessage("椅背开始蓄力", "松手瞬间，泡面就要起飞");
+  setMessage("椅背开始蓄力", "松手瞬间，泡面就要起飞。");
+  playTone(260, 0.05, "sawtooth");
 }
 
 function launch() {
-  if (state.mode !== "charging") return;
+  if (state.screen !== "game" || state.mode !== "charging") return;
 
   const power = clamp(state.charge, 0.12, 1);
   const launchAngle = lerp(-0.72, -0.27, power);
@@ -125,7 +248,8 @@ function launch() {
     vy: Math.sin(launchAngle) * speed,
     spin: lerp(6.2, 12.8, power),
   };
-  setMessage("人刚坐起来", "椅背还憋着劲，泡面马上遭殃");
+  setMessage("人刚坐起来", "椅背还攒着劲，泡面马上遭殃。");
+  playTone(360 + power * 260, 0.09, "square");
 }
 
 function fireNoodles() {
@@ -134,7 +258,6 @@ function fireNoodles() {
   state.mode = "launched";
   state.recoil = 1;
   state.shake = 7;
-  state.flightStartedAt = performance.now();
   state.pendingLaunch = null;
   state.noodles = {
     x: 302,
@@ -145,7 +268,8 @@ function fireNoodles() {
     spin: launchData.spin,
     active: true,
   };
-  setMessage("泡面升空", "屏幕：怎么感觉背后一凉");
+  setMessage("泡面升空", "屏幕：怎么感觉背后一凉？");
+  playTone(620, 0.12, "triangle");
 }
 
 function resetRound() {
@@ -158,26 +282,29 @@ function resetRound() {
   state.pendingLaunch = null;
   state.noodles = makeNoodlesAtRest();
   state.particles = [];
-  setMessage("准备开弹", "按住画面或空格蓄力");
+  setMessage("准备开始", "按住画面或空格蓄力。");
 }
 
 function finishHit() {
   if (state.mode === "hit") return;
   const bonus = Math.round(300 + state.charge * 700);
   state.score += bonus;
-  state.best = Math.max(state.best, state.score);
+  addScore(state.score);
   state.mode = "hit";
   state.shake = 18;
   spawnImpact(target.x + 48, target.y + 60, "#ffcf4a", 34);
   spawnImpact(target.x + 76, target.y + 45, "#ff6b4a", 22);
-  setMessage("精准爆屏！", `+${bonus} 分，泡面完成了它的使命`);
+  setMessage("精准爆屏！", `+${bonus} 分，泡面完成了它的使命。`);
+  playTone(760, 0.08, "square");
+  window.setTimeout(() => playTone(980, 0.1, "square"), 90);
 }
 
 function finishMiss(reason = "泡面自由飞翔") {
   if (state.mode === "miss") return;
   state.mode = "miss";
   state.shake = 3;
-  setMessage(reason, "点重新开始，再给椅背一次机会");
+  setMessage(reason, "点重新开始，再给椅背一次机会。");
+  playTone(160, 0.14, "sawtooth");
 }
 
 function spawnImpact(x, y, color, count) {
@@ -190,7 +317,6 @@ function spawnImpact(x, y, color, count) {
       vx: Math.cos(angle) * speed,
       vy: Math.sin(angle) * speed,
       life: 0.45 + Math.random() * 0.6,
-      maxLife: 1,
       size: 3 + Math.random() * 8,
       color,
     });
@@ -205,9 +331,7 @@ function update(dt) {
     state.noodles.x = lerp(rest.x, 205, state.charge);
     state.noodles.y = lerp(rest.y, 292, state.charge);
     state.noodles.rot = lerp(-0.08, -0.38, state.charge);
-    if (state.charge >= 1) {
-      setMessage("蓄满了！", "现在松手，显示器会有点紧张");
-    }
+    if (state.charge >= 1) setMessage("蓄满了！", "现在松手，显示器会有点紧张。");
   } else if (state.mode === "recovering") {
     state.releaseTimer += dt;
     const sitUp = easeOutCubic(state.releaseTimer / 0.42);
@@ -217,12 +341,8 @@ function update(dt) {
     state.noodles.x = lerp(205, 302, snap);
     state.noodles.y = lerp(292, 342, snap);
     state.noodles.rot = lerp(-0.38, -0.15, snap);
-    if (sitUp > 0.45) {
-      setMessage("椅背回弹！", "就是现在，泡面弹射");
-    }
-    if (state.releaseTimer >= 0.5) {
-      fireNoodles();
-    }
+    if (sitUp > 0.45) setMessage("椅背回弹！", "就是现在，泡面弹射。");
+    if (state.releaseTimer >= 0.5) fireNoodles();
   } else if (state.mode === "launched") {
     state.noodles.vy += gravity * dt;
     state.noodles.x += state.noodles.vx * dt;
@@ -272,12 +392,7 @@ function draw() {
   const shakeX = state.shake ? (Math.random() - 0.5) * state.shake : 0;
   const shakeY = state.shake ? (Math.random() - 0.5) * state.shake : 0;
   ctx.translate(shakeX, shakeY);
-
-  if (state.artReady) {
-    drawBackgroundArt();
-  } else {
-    drawRoom();
-  }
+  drawRoom();
   if (state.spritesReady) {
     drawAISceneSprites();
   } else {
@@ -289,27 +404,34 @@ function draw() {
   drawNoodles();
   drawParticles();
   drawForeground();
-
   ctx.restore();
 }
 
-function drawBackgroundArt() {
-  ctx.drawImage(backgroundArt, 0, 0, W, H);
-  ctx.fillStyle = "rgba(255,255,255,0.07)";
+function drawRoom() {
+  const sky = ctx.createLinearGradient(0, 0, 0, H);
+  sky.addColorStop(0, "#aee2ff");
+  sky.addColorStop(0.56, "#dff6ff");
+  sky.addColorStop(0.561, "#f1d6a7");
+  sky.addColorStop(1, "#dfbf82");
+  ctx.fillStyle = sky;
   ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = "rgba(255,255,255,0.55)";
+  roundedRect(76, 72, 238, 118, 8, true);
+  ctx.strokeStyle = "#2b3139";
+  ctx.lineWidth = 5;
+  ctx.strokeRect(76, 72, 238, 118);
+  ctx.beginPath();
+  ctx.moveTo(195, 72);
+  ctx.lineTo(195, 190);
+  ctx.moveTo(76, 131);
+  ctx.lineTo(314, 131);
+  ctx.stroke();
+  ctx.fillStyle = "rgba(255,255,255,0.35)";
+  ctx.fillRect(0, 560, W, 24);
 }
 
 function drawInteractiveTargets() {
-  if (!state.artReady && !state.spritesReady) return;
-  ctx.save();
-  ctx.globalAlpha = 0.96;
-  if (!state.spritesReady) {
-    drawMonitor();
-  }
-  if (state.mode === "charging" || state.mode === "launched") {
-    drawLaunchGuide();
-  }
-  ctx.restore();
+  if (state.mode === "charging" || state.mode === "launched") drawLaunchGuide();
 }
 
 function drawAISceneSprites() {
@@ -327,23 +449,9 @@ function drawAISceneSprites() {
     const sitUp = easeOutCubic(state.releaseTimer / 0.42);
     const snap = easeInCubic((state.releaseTimer - 0.24) / 0.24);
     if (state.releaseTimer < 0.3) {
-      drawImageFit(
-        sprites.sittingChair,
-        lerp(150, 126, sitUp),
-        lerp(120, 138, sitUp),
-        lerp(500, 532, sitUp),
-        lerp(500, 532, sitUp),
-        lerp(-0.08, 0.02, sitUp),
-      );
+      drawImageFit(sprites.sittingChair, lerp(150, 126, sitUp), lerp(120, 138, sitUp), lerp(500, 532, sitUp), lerp(500, 532, sitUp), lerp(-0.08, 0.02, sitUp));
     } else if (snap < 0.98) {
-      drawImageFit(
-        sprites.sittingChair,
-        126 + Math.sin(performance.now() / 24) * 4 * snap,
-        138 - snap * 10,
-        532,
-        532,
-        0.02 + snap * 0.04,
-      );
+      drawImageFit(sprites.sittingChair, 126 + Math.sin(performance.now() / 24) * 4 * snap, 138 - snap * 10, 532, 532, 0.02 + snap * 0.04);
     } else {
       drawImageFit(sprites.springChair, 122 + state.recoil * 18, 158 - state.recoil * 22, 500, 500, 0.03);
     }
@@ -367,7 +475,6 @@ function drawAISceneSprites() {
     drawBurst(target.x + target.w / 2, target.y + target.h / 2, 72, 13);
     ctx.restore();
   }
-
   ctx.restore();
 }
 
@@ -399,31 +506,6 @@ function drawLaunchGuide() {
   ctx.restore();
 }
 
-function drawRoom() {
-  const sky = ctx.createLinearGradient(0, 0, 0, H);
-  sky.addColorStop(0, "#aee2ff");
-  sky.addColorStop(0.58, "#dff6ff");
-  sky.addColorStop(0.581, "#f1d6a7");
-  sky.addColorStop(1, "#dfbf82");
-  ctx.fillStyle = sky;
-  ctx.fillRect(0, 0, W, H);
-
-  ctx.fillStyle = "rgba(255,255,255,0.55)";
-  roundedRect(76, 72, 238, 118, 8, true);
-  ctx.strokeStyle = "#2b3139";
-  ctx.lineWidth = 5;
-  ctx.strokeRect(76, 72, 238, 118);
-  ctx.beginPath();
-  ctx.moveTo(195, 72);
-  ctx.lineTo(195, 190);
-  ctx.moveTo(76, 131);
-  ctx.lineTo(314, 131);
-  ctx.stroke();
-
-  ctx.fillStyle = "rgba(255,255,255,0.35)";
-  ctx.fillRect(0, 560, W, 24);
-}
-
 function drawDesk() {
   ctx.fillStyle = "#7b4b31";
   roundedRect(829, 461, 345, 32, 6, true);
@@ -438,16 +520,13 @@ function drawDesk() {
 
 function drawMonitor() {
   ctx.save();
-  if (state.mode === "hit") {
-    ctx.translate(Math.sin(performance.now() / 35) * 4, Math.cos(performance.now() / 42) * 3);
-  }
+  if (state.mode === "hit") ctx.translate(Math.sin(performance.now() / 35) * 4, Math.cos(performance.now() / 42) * 3);
   ctx.fillStyle = "#20242a";
   roundedRect(target.x - 16, target.y - 16, target.w + 32, target.h + 32, 8, true);
   ctx.fillStyle = state.mode === "hit" ? "#252b34" : "#4aebd2";
   roundedRect(target.x, target.y, target.w, target.h, 4, true);
   ctx.fillStyle = "rgba(255,255,255,0.22)";
   ctx.fillRect(target.x + 15, target.y + 16, target.w - 48, 18);
-
   if (state.mode === "hit") {
     ctx.strokeStyle = "#f6fbff";
     ctx.lineWidth = 5;
@@ -456,7 +535,6 @@ function drawMonitor() {
     ctx.lineWidth = 3;
     drawBurst(target.x + 88, target.y + 64, 58, 11);
   }
-
   ctx.fillStyle = "#20242a";
   ctx.fillRect(target.x + 72, target.y + target.h + 14, 33, 55);
   roundedRect(target.x + 31, target.y + target.h + 63, 116, 20, 9, true);
@@ -518,7 +596,6 @@ function drawPerson() {
   ctx.arc(414, 286 - stretch * 18, 38, 0, Math.PI * 2);
   ctx.fill();
   ctx.stroke();
-
   ctx.fillStyle = "#20242a";
   ctx.beginPath();
   ctx.arc(401, 283 - stretch * 18, 4, 0, Math.PI * 2);
@@ -529,13 +606,11 @@ function drawPerson() {
   ctx.beginPath();
   ctx.arc(414, 300 - stretch * 18, 13 + stretch * 5, 0.1, Math.PI - 0.1);
   ctx.stroke();
-
   ctx.fillStyle = "#36a3ff";
   roundedRect(370, 340 - stretch * 10, 94, 126, 22, true);
   ctx.strokeStyle = "#20242a";
   ctx.lineWidth = 8;
   roundedRect(370, 340 - stretch * 10, 94, 126, 22, false);
-
   ctx.strokeStyle = "#20242a";
   ctx.lineWidth = 13;
   ctx.beginPath();
@@ -544,9 +619,6 @@ function drawPerson() {
   ctx.moveTo(451, 354 - stretch * 12);
   ctx.lineTo(514 + stretch * 56, 302 - stretch * 36);
   ctx.stroke();
-
-  ctx.strokeStyle = "#20242a";
-  ctx.lineWidth = 13;
   ctx.beginPath();
   ctx.moveTo(388, 466);
   ctx.lineTo(355, 540);
@@ -559,15 +631,12 @@ function drawPerson() {
 function drawNoodles() {
   const n = state.noodles;
   if (state.spritesReady) {
-    if (state.mode !== "launched") {
-      return;
-    }
+    if (state.mode !== "launched") return;
     ctx.save();
     ctx.translate(n.x, n.y);
     ctx.rotate(n.rot);
     ctx.drawImage(sprites.noodles, -62, -41, 124, 82);
     ctx.restore();
-
     ctx.strokeStyle = "rgba(255,107,74,0.45)";
     ctx.lineWidth = 5;
     ctx.beginPath();
@@ -593,15 +662,6 @@ function drawNoodles() {
   ctx.textBaseline = "middle";
   ctx.fillText("泡面", 0, 11);
   ctx.restore();
-
-  if (state.mode === "launched") {
-    ctx.strokeStyle = "rgba(255,107,74,0.45)";
-    ctx.lineWidth = 5;
-    ctx.beginPath();
-    ctx.moveTo(n.x - 44, n.y + 18);
-    ctx.quadraticCurveTo(n.x - 82, n.y + 8, n.x - 130, n.y + 34);
-    ctx.stroke();
-  }
 }
 
 function drawParticles() {
@@ -622,7 +682,6 @@ function drawForeground() {
   ctx.ellipse(370, 628, 238, 22, 0, 0, Math.PI * 2);
   ctx.ellipse(1005, 627, 260, 23, 0, 0, Math.PI * 2);
   ctx.fill();
-
   ctx.fillStyle = "#20242a";
   ctx.font = "900 24px Microsoft YaHei, sans-serif";
   ctx.textAlign = "left";
@@ -679,39 +738,64 @@ function loop(now) {
 
 canvas.addEventListener("pointerdown", (event) => {
   event.preventDefault();
+  if (state.screen !== "game") return;
   canvas.setPointerCapture(event.pointerId);
   startCharge();
 });
+
 canvas.addEventListener("pointerup", (event) => {
   event.preventDefault();
   launch();
 });
+
 canvas.addEventListener("pointercancel", launch);
 
 chargeButton.addEventListener("pointerdown", (event) => {
   event.preventDefault();
+  if (state.screen !== "game") return;
   chargeButton.setPointerCapture(event.pointerId);
   startCharge();
 });
+
 chargeButton.addEventListener("pointerup", (event) => {
   event.preventDefault();
   launch();
 });
-chargeButton.addEventListener("pointercancel", launch);
 
+chargeButton.addEventListener("pointercancel", launch);
 resetButton.addEventListener("click", resetRound);
+startGameButton.addEventListener("click", startGame);
+leaderboardButton.addEventListener("click", () => showMenu("leaderboard"));
+volumeButton.addEventListener("click", () => showMenu("volume"));
+backButtons.forEach((button) => button.addEventListener("click", () => showMenu("main")));
+clearScoresButton.addEventListener("click", () => {
+  state.scores = [];
+  state.best = 0;
+  saveScores();
+  renderLeaderboard();
+});
+volumeSlider.addEventListener("input", () => setVolume(Number(volumeSlider.value) / 100));
+muteButton.addEventListener("click", toggleMute);
+testSoundButton.addEventListener("click", () => {
+  playTone(420, 0.08, "triangle");
+  window.setTimeout(() => playTone(640, 0.08, "triangle"), 90);
+});
 
 window.addEventListener("keydown", (event) => {
   if (event.code !== "Space" || event.repeat) return;
+  if (state.screen !== "game") return;
   event.preventDefault();
   startCharge();
 });
 
 window.addEventListener("keyup", (event) => {
   if (event.code !== "Space") return;
+  if (state.screen !== "game") return;
   event.preventDefault();
   launch();
 });
 
 setMessage(state.messageTitle, state.messageBody);
+renderVolume();
+showMenu("main");
 requestAnimationFrame(loop);

@@ -42,8 +42,51 @@
       <section class="stage-wrap" aria-label="椅背投石机游戏区域">
         <canvas id="gameCanvas" width="1280" height="720"></canvas>
         <div id="messagePanel" class="message-panel">
-          <strong>准备开弹</strong>
+          <strong>准备开始</strong>
           <span>按住画面或空格蓄力</span>
+        </div>
+        <div id="menuOverlay" class="menu-overlay" data-view="main">
+          <section class="menu-panel menu-view is-active" data-panel="main" aria-label="主界面">
+            <div class="menu-title">
+              <span class="menu-kicker">自制整活小游戏</span>
+              <h2>椅背投石机</h2>
+              <p>先选模式，再把泡面优雅地送进显示器。</p>
+            </div>
+            <div class="menu-actions">
+              <button id="startGameButton" class="menu-button primary" type="button">开始游戏</button>
+              <button id="leaderboardButton" class="menu-button" type="button">排行榜</button>
+              <button id="volumeButton" class="menu-button" type="button">音量设置</button>
+            </div>
+          </section>
+
+          <section class="menu-panel menu-view" data-panel="leaderboard" aria-label="排行榜">
+            <div class="menu-title compact">
+              <span class="menu-kicker">本机记录</span>
+              <h2>排行榜</h2>
+            </div>
+            <ol id="leaderboardList" class="leaderboard-list"></ol>
+            <div class="menu-actions row">
+              <button id="clearScoresButton" class="menu-button subtle" type="button">清空记录</button>
+              <button class="menu-button primary" data-menu-back type="button">返回主界面</button>
+            </div>
+          </section>
+
+          <section class="menu-panel menu-view" data-panel="volume" aria-label="音量设置">
+            <div class="menu-title compact">
+              <span class="menu-kicker">声音反馈</span>
+              <h2>音量设置</h2>
+            </div>
+            <label class="volume-control" for="volumeSlider">
+              <span>音量</span>
+              <input id="volumeSlider" type="range" min="0" max="100" step="1" />
+              <strong id="volumeValue">70%</strong>
+            </label>
+            <button id="muteButton" class="menu-button subtle" type="button">静音</button>
+            <div class="menu-actions row">
+              <button id="testSoundButton" class="menu-button" type="button">试听音效</button>
+              <button class="menu-button primary" data-menu-back type="button">返回主界面</button>
+            </div>
+          </section>
         </div>
       </section>
 
